@@ -136,7 +136,10 @@ except:
 st.sidebar.title("Menú Principal")
 
 # LOGIN
-users = {"admin": "vida123"}
+users = {
+    "dfuentes": "Jdfm2026**",
+    "rmerlin": "rebeka2026"
+    }
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
