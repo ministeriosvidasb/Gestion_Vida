@@ -30,7 +30,15 @@ def init_db():
 def guardar_finanza(fecha, tipo, categoria, monto, nota, usuario, evidencia, nombre_archivo):
     conn = sqlite3.connect('iglesia.db')
     c = conn.cursor()
-    blob_data = evidencia.read() if evidencia else None
+    # Leer el archivo y convertirlo a binario para guardar en BD
+    if evidencia:
+        # Si venimos del formulario, 'evidencia' es un UploadedFile, hay que leerlo
+        # Si ya lo leímos antes (para validación), hay que asegurar que el puntero esté al inicio
+        evidencia.seek(0)
+        blob_data = evidencia.read()
+    else:
+        blob_data = None
+        
     c.execute("INSERT INTO finanzas VALUES (?,?,?,?,?,?,?,?)", 
               (fecha, tipo, categoria, monto, nota, usuario, blob_data, nombre_archivo))
     conn.commit()
@@ -135,9 +143,9 @@ except:
 
 st.sidebar.title("Menú Principal")
 
-# LOGIN (ACTUALIZADO CON TUS USUARIOS)
+# LOGIN
 users = {
-    "dfuentes": "Jdfm2026**",
+    "dfuentes": "Pastordf2026**",
     "rmerlin": "rebeka2026"
 }
 
@@ -209,45 +217,60 @@ else:
         else:
             st.info("Registra asistencias para ver la gráfica de comportamiento.")
 
-    # 2. FINANZAS (ACTUALIZADO CON NUEVAS CATEGORÍAS Y ADVERTENCIA)
+    # 2. FINANZAS (CORREGIDO: CAMBIO AUTOMÁTICO DE CATEGORÍAS Y VALIDACIÓN)
     elif menu == "💰 Finanzas":
         st.header("Gestión Financiera")
         pestana1, pestana2 = st.tabs(["➕ Nuevo Registro", "📋 Historial"])
 
         with pestana1:
+            col_ext_1, col_ext_2 = st.columns([1, 2])
+            with col_ext_1:
+                # SACAMOS EL TIPO FUERA DEL FORM PARA QUE ACTUALICE LA PÁGINA AL INSTANTE
+                f_tipo = st.radio("Seleccione Tipo de Movimiento:", ["Ingreso", "Gasto"], horizontal=True)
+
+            # LÓGICA DE CATEGORÍAS Y ADVERTENCIA FUERA DEL FORM
+            if f_tipo == "Ingreso":
+                cat_opts = ["Ofrendas", "Diezmos", "Ofrendas de Amor", "Donaciones", "Otros"]
+            else: # Gasto
+                cat_opts = ["Pago de Servicios", "Pago de renta", "Ayuda Social", "Otros"]
+                st.warning("⚠️ REQUERIDO: Para registrar un GASTO es OBLIGATORIO subir la factura o recibo.")
+
+            # INICIO DEL FORMULARIO
             with st.form("form_finanzas", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 with col1:
                     f_fecha = st.date_input("Fecha")
-                    f_tipo = st.selectbox("Tipo", ["Ingreso", "Gasto"])
+                    # El tipo ya lo seleccionamos arriba, aquí solo lo mostramos o usamos el valor
+                    st.write(f"Tipo seleccionado: **{f_tipo}**")
                 
-                # LÓGICA DE CATEGORÍAS Y ADVERTENCIA
-                if f_tipo == "Ingreso":
-                    cat_opts = ["Ofrendas", "Diezmos", "Ofrendas de Amor", "Donaciones", "Otros"]
-                else: # Gasto
-                    cat_opts = ["Pago de Servicios", "Pago de renta", "Ayuda Social", "Otros"]
-                    st.warning("⚠️ IMPORTANTE: Recuerde tener el soporte físico (Factura/Recibo) antes de registrar el gasto.")
-
                 with col2:
                     f_cat = st.selectbox("Categoría", cat_opts)
                     f_monto = st.number_input("Monto", min_value=0.0, step=0.01)
                 
                 f_nota = st.text_area("Nota / Detalle")
-                f_archivo = st.file_uploader("Evidencia", type=['png', 'jpg', 'pdf'])
+                f_archivo = st.file_uploader("Adjuntar Soporte (Factura/Recibo)", type=['png', 'jpg', 'jpeg', 'pdf'])
+                
+                # PUNTO 1: VISTA PREVIA DEL ADJUNTO DENTRO DEL FORMULARIO
+                if f_archivo:
+                    st.info(f"Archivo cargado: {f_archivo.name}")
+                    if f_archivo.type in ['image/png', 'image/jpeg', 'image/jpg']:
+                        st.image(f_archivo, width=200, caption="Vista previa")
                 
                 submitted = st.form_submit_button("💾 Guardar Registro", use_container_width=True)
                 
                 if submitted:
-                    f_name = f_archivo.name if f_archivo else None
-                    # Se guarda el usuario de la sesión actual
-                    guardar_finanza(f_fecha, f_tipo, f_cat, f_monto, f_nota, st.session_state['user_role'], f_archivo, f_name)
-                    st.success("Registro guardado exitosamente.")
+                    # PUNTO 3: VALIDACIÓN ESTRICTA
+                    if f_tipo == "Gasto" and f_archivo is None:
+                        st.error("⛔ ERROR: No se puede guardar un GASTO sin adjuntar el soporte físico (Factura/Recibo).")
+                    else:
+                        f_name = f_archivo.name if f_archivo else None
+                        guardar_finanza(f_fecha, f_tipo, f_cat, f_monto, f_nota, st.session_state['user_role'], f_archivo, f_name)
+                        st.success("✅ Registro guardado exitosamente.")
 
         with pestana2:
             df = cargar_datos("finanzas")
             if not df.empty:
                 df = df.sort_values(by='fecha', ascending=False)
-                # Headers
                 c1, c2, c3, c4, c5 = st.columns([2, 2, 3, 2, 1])
                 c1.markdown("**Fecha**"); c2.markdown("**Tipo**"); c3.markdown("**Detalle**"); c4.markdown("**Monto**"); c5.markdown("**Acción**")
                 st.divider()
@@ -256,9 +279,18 @@ else:
                     with xc1: st.write(row['fecha'])
                     with xc2: st.write(f"{'🟢' if row['tipo']=='Ingreso' else '🔴'} {row['categoria']}")
                     with xc3: 
-                        st.caption(f"Por: {row['usuario']}") # Mostrar quien lo hizo
+                        st.caption(f"Por: {row['usuario']}")
                         st.write(row['nota'])
-                        if row['evidencia']: st.caption("📎 Con adjunto")
+                        if row['evidencia']: 
+                            # Mostrar miniatura si es imagen también en historial
+                            file_name = row['nombre_archivo'] if row['nombre_archivo'] else "doc"
+                            if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                                try:
+                                    image = Image.open(io.BytesIO(row['evidencia']))
+                                    st.image(image, width=100)
+                                except: pass
+                            else:
+                                st.download_button("📎 Descargar PDF", row['evidencia'], file_name)
                     with xc4: st.write(f"${row['monto']:,.2f}")
                     with xc5:
                         if st.button("🗑️", key=f"del_f_{row['rowid']}"):
