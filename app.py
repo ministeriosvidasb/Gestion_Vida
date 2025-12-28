@@ -137,7 +137,7 @@ st.sidebar.title("Menú Principal")
 
 # LOGIN (ACTUALIZADO CON TUS USUARIOS)
 users = {
-    "dfuentes": "Pastordf2026**",
+    "dfuentes": "Jdfm2026**",
     "rmerlin": "rebeka2026"
 }
 
