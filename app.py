@@ -54,7 +54,7 @@ def eliminar_registro(tabla, id_registro):
     conn.commit()
     conn.close()
 
-# --- FUNCIONES PDF CON LOGO (PUNTO 5) ---
+# --- FUNCIONES PDF ---
 class PDF(FPDF):
     def header(self):
         # Intentar poner logo si existe
@@ -79,9 +79,9 @@ def generar_pdf_finanzas(df):
     pdf.add_page()
     pdf.set_font("Arial", size=10)
     
-    # Encabezados de tabla
+    # Encabezados
     cols = ["Fecha", "Tipo", "Categoria", "Monto", "Nota"]
-    anchos = [30, 30, 40, 30, 60] # Ajuste de anchos
+    anchos = [30, 30, 40, 30, 60]
     
     for i, col in enumerate(cols):
         pdf.cell(anchos[i], 10, col, 1, 0, 'C')
@@ -91,13 +91,44 @@ def generar_pdf_finanzas(df):
     for index, row in df.iterrows():
         pdf.cell(anchos[0], 10, str(row['fecha']), 1)
         pdf.cell(anchos[1], 10, str(row['tipo']), 1)
-        # Decodificar texto para caracteres especiales
         cat_str = str(row['categoria']).encode('latin-1', 'replace').decode('latin-1')
         nota_str = str(row['nota']).encode('latin-1', 'replace').decode('latin-1')
         
         pdf.cell(anchos[2], 10, cat_str[:18], 1)
         pdf.cell(anchos[3], 10, f"${row['monto']}", 1)
         pdf.cell(anchos[4], 10, nota_str[:30], 1)
+        pdf.ln()
+        
+    return pdf.output(dest='S').encode('latin-1')
+
+def generar_pdf_asistencia(df):
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
+    
+    # Encabezados (Fecha, Servicio, H, M, N, Total, Obs)
+    headers = ["Fecha", "Servicio", "H", "M", "N", "Total", "Observaciones"]
+    anchos = [25, 45, 10, 10, 10, 15, 75]
+    
+    for i, h in enumerate(headers):
+        pdf.cell(anchos[i], 10, h, 1, 0, 'C')
+    pdf.ln()
+    
+    # Datos
+    for index, row in df.iterrows():
+        total = row['hombres'] + row['mujeres'] + row['ninos']
+        
+        pdf.cell(anchos[0], 10, str(row['fecha']), 1)
+        serv_str = str(row['servicio']).encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(anchos[1], 10, serv_str[:22], 1)
+        
+        pdf.cell(anchos[2], 10, str(row['hombres']), 1, 0, 'C')
+        pdf.cell(anchos[3], 10, str(row['mujeres']), 1, 0, 'C')
+        pdf.cell(anchos[4], 10, str(row['ninos']), 1, 0, 'C')
+        pdf.cell(anchos[5], 10, str(total), 1, 0, 'C')
+        
+        nota_str = str(row['nota']).encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(anchos[6], 10, nota_str[:40], 1)
         pdf.ln()
         
     return pdf.output(dest='S').encode('latin-1')
@@ -111,7 +142,7 @@ try:
     logo = Image.open(logo_path)
     st.sidebar.image(logo, use_container_width=True)
 except:
-    st.sidebar.warning("Sube un archivo llamado 'logo.jpg' a la carpeta.")
+    pass # Si no hay logo, no mostrar error, solo no carga
 
 st.sidebar.title("Menú Principal")
 
@@ -138,13 +169,12 @@ else:
 
     menu = st.sidebar.radio("Navegación:", ["📊 Panel", "💰 Finanzas", "👥 Asistencia", "📂 Reportes"])
 
-    # 1. PANEL (CON GRÁFICOS RESTAURADOS - PUNTO 1)
+    # 1. PANEL
     if menu == "📊 Panel":
         st.title("Panel de Control")
         df_fin = cargar_datos("finanzas")
         
         if not df_fin.empty:
-            # Métricas
             ing = df_fin[df_fin['tipo'] == 'Ingreso']['monto'].sum()
             gas = df_fin[df_fin['tipo'] == 'Gasto']['monto'].sum()
             col1, col2, col3 = st.columns(3)
@@ -154,7 +184,6 @@ else:
             
             st.divider()
             
-            # GRÁFICOS (PUNTO 1: Restaurados)
             g1, g2 = st.columns(2)
             with g1:
                 st.subheader("Ingresos vs Gastos")
@@ -169,9 +198,9 @@ else:
                                  title="Desglose de Movimientos", hole=0.3)
                 st.plotly_chart(fig_pie, use_container_width=True)
         else:
-            st.info("Aún no hay datos registrados para mostrar gráficos.")
+            st.info("Registra movimientos para ver los gráficos.")
 
-    # 2. FINANZAS (CON BOTÓN ELIMINAR Y VISTA ARCHIVOS - PUNTOS 2 y 3)
+    # 2. FINANZAS
     elif menu == "💰 Finanzas":
         st.header("Gestión Financiera")
         pestana1, pestana2 = st.tabs(["➕ Nuevo Registro", "📋 Historial y Edición"])
@@ -188,138 +217,147 @@ else:
                     f_monto = st.number_input("Monto", min_value=0.0, step=0.01)
                 
                 f_nota = st.text_area("Nota / Descripción")
-                f_archivo = st.file_uploader("Adjuntar Comprobante (Imagen o PDF)", type=['png', 'jpg', 'jpeg', 'pdf'])
+                f_archivo = st.file_uploader("Adjuntar Comprobante", type=['png', 'jpg', 'jpeg', 'pdf'])
                 
                 submitted = st.form_submit_button("💾 Guardar Registro", use_container_width=True)
                 
                 if submitted:
                     f_nombre_archivo = f_archivo.name if f_archivo else None
                     guardar_finanza(f_fecha, f_tipo, f_cat, f_monto, f_nota, st.session_state['user_role'], f_archivo, f_nombre_archivo)
-                    st.success("¡Registro guardado exitosamente!")
+                    st.success("Guardado exitosamente.")
 
         with pestana2:
             st.subheader("Historial de Movimientos")
             df = cargar_datos("finanzas")
             
             if not df.empty:
-                # Ordenar por fecha descendente
                 df = df.sort_values(by='fecha', ascending=False)
                 
-                # Encabezados de la lista
+                # Encabezados
                 col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns([2, 2, 3, 2, 1])
                 col_h1.markdown("**Fecha**")
                 col_h2.markdown("**Tipo/Cat**")
-                col_h3.markdown("**Detalle/Evidencia**") # PUNTO 3
+                col_h3.markdown("**Detalle/Evidencia**") 
                 col_h4.markdown("**Monto**")
-                col_h5.markdown("**Acción**") # PUNTO 2
+                col_h5.markdown("**Acción**")
                 
                 st.divider()
 
-                # Loop para crear filas personalizadas
                 for index, row in df.iterrows():
                     c1, c2, c3, c4, c5 = st.columns([2, 2, 3, 2, 1])
-                    
-                    with c1:
-                        st.write(row['fecha'])
-                    
+                    with c1: st.write(row['fecha'])
                     with c2:
                         color = "🟢" if row['tipo'] == "Ingreso" else "🔴"
                         st.write(f"{color} {row['categoria']}")
-                    
                     with c3:
                         st.caption(row['nota'])
-                        # PUNTO 3: Visualizar adjuntos
                         if row['evidencia']:
-                            file_name = row['nombre_archivo'] if row['nombre_archivo'] else "archivo"
+                            file_name = row['nombre_archivo'] if row['nombre_archivo'] else "doc"
                             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                                # Es imagen, mostrar miniatura
                                 try:
                                     image = Image.open(io.BytesIO(row['evidencia']))
                                     st.image(image, width=100)
-                                except:
-                                    st.error("Error img")
+                                except: st.error("Error img")
                             else:
-                                # Es PDF u otro, botón descarga
-                                st.download_button(label="📎 Ver Doc", 
-                                                   data=row['evidencia'], 
-                                                   file_name=file_name,
-                                                   key=f"dl_{row['rowid']}")
-                    
-                    with c4:
-                        st.write(f"**${row['monto']:,.2f}**")
-                    
+                                st.download_button("📎 Ver", row['evidencia'], file_name)
+                    with c4: st.write(f"**${row['monto']:,.2f}**")
                     with c5:
-                        # PUNTO 2: Botón eliminar en lugar de selectbox
-                        if st.button("🗑️", key=f"del_{row['rowid']}", help="Eliminar registro permanentemente"):
+                        if st.button("🗑️", key=f"del_fin_{row['rowid']}"):
                             eliminar_registro("finanzas", row['rowid'])
                             st.rerun()
-                    
-                    st.markdown("---") # Separador entre filas
+                    st.markdown("---")
             else:
-                st.info("No hay registros en la base de datos.")
+                st.info("No hay datos.")
 
-    # 3. ASISTENCIA (CON NUEVOS SERVICIOS Y OBSERVACIONES - PUNTO 4)
+    # 3. ASISTENCIA (ACTUALIZADO: PESTAÑAS Y FORMATO IGUAL A FINANZAS)
     elif menu == "👥 Asistencia":
-        st.header("Registro de Asistencia")
+        st.header("Control de Asistencia")
+        # PESTAÑAS
+        tab_asis_1, tab_asis_2 = st.tabs(["➕ Nueva Asistencia", "📋 Historial y Borrar"])
         
-        with st.form("form_asistencia", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                a_fecha = st.date_input("Fecha")
-                # PUNTO 4: Lista exacta de servicios
-                servicios_lista = [
-                    "Culto Dominical", 
-                    "Lunes de Oración", 
-                    "Estudio Biblico", 
-                    "Vigilia", 
-                    "Otras Actividades Especiales"
-                ]
-                a_serv = st.selectbox("Servicio", servicios_lista)
-            
-            with col2:
-                h = st.number_input("Hombres", min_value=0)
-                m = st.number_input("Mujeres", min_value=0)
-                n = st.number_input("Niños", min_value=0)
-            
-            # PUNTO 4: Campo observaciones
-            a_nota = st.text_area("Observaciones", placeholder="Ej: Hubo invitados especiales, clima lluvioso, etc.")
-            
-            total = h + m + n
-            st.write(f"**Total Asistentes: {total}**")
-            
-            submitted_a = st.form_submit_button("💾 Guardar Asistencia", use_container_width=True)
-            
-            if submitted_a:
-                guardar_asistencia(a_fecha, a_serv, h, m, n, a_nota)
-                st.success("Asistencia guardada correctamente.")
+        # PESTAÑA 1: Formulario
+        with tab_asis_1:
+            with st.form("form_asistencia", clear_on_submit=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    a_fecha = st.date_input("Fecha")
+                    servicios_lista = ["Culto Dominical", "Lunes de Oración", "Estudio Biblico", "Vigilia", "Otras Actividades Especiales"]
+                    a_serv = st.selectbox("Servicio", servicios_lista)
+                
+                with col2:
+                    h = st.number_input("Hombres", min_value=0)
+                    m = st.number_input("Mujeres", min_value=0)
+                    n = st.number_input("Niños", min_value=0)
+                
+                a_nota = st.text_area("Observaciones", placeholder="Detalles adicionales del servicio...")
+                
+                total = h + m + n
+                st.write(f"**Total Asistentes: {total}**")
+                
+                submitted_a = st.form_submit_button("💾 Guardar Asistencia", use_container_width=True)
+                
+                if submitted_a:
+                    guardar_asistencia(a_fecha, a_serv, h, m, n, a_nota)
+                    st.success("Asistencia guardada correctamente.")
 
-        # Tabla rápida de historial asistencias
-        st.divider()
-        st.subheader("Últimas Asistencias")
-        df_asis = cargar_datos("asistencia")
-        if not df_asis.empty:
-            df_asis['Total'] = df_asis['hombres'] + df_asis['mujeres'] + df_asis['ninos']
-            st.dataframe(df_asis[['fecha', 'servicio', 'Total', 'nota']].sort_values(by='fecha', ascending=False).head(5))
+        # PESTAÑA 2: Historial idéntico a Finanzas
+        with tab_asis_2:
+            st.subheader("Historial de Servicios")
+            df_asis = cargar_datos("asistencia")
+            
+            if not df_asis.empty:
+                df_asis = df_asis.sort_values(by='fecha', ascending=False)
+                
+                # Encabezados
+                c_h1, c_h2, c_h3, c_h4, c_h5 = st.columns([2, 3, 2, 3, 1])
+                c_h1.markdown("**Fecha**")
+                c_h2.markdown("**Servicio**")
+                c_h3.markdown("**Desglose**")
+                c_h4.markdown("**Observaciones**")
+                c_h5.markdown("**Acción**")
+                
+                st.divider()
+                
+                for index, row in df_asis.iterrows():
+                    total_asis = row['hombres'] + row['mujeres'] + row['ninos']
+                    col1, col2, col3, col4, col5 = st.columns([2, 3, 2, 3, 1])
+                    
+                    with col1: st.write(row['fecha'])
+                    with col2: st.write(f"⛪ {row['servicio']}")
+                    with col3: 
+                        st.write(f"H: {row['hombres']} | M: {row['mujeres']} | N: {row['ninos']}")
+                        st.caption(f"**Total: {total_asis}**")
+                    with col4: st.write(row['nota'])
+                    with col5:
+                        if st.button("🗑️", key=f"del_asis_{row['rowid']}"):
+                            eliminar_registro("asistencia", row['rowid'])
+                            st.rerun()
+                    st.markdown("---")
+            else:
+                st.info("No hay registros de asistencia.")
 
-    # 4. REPORTES
+    # 4. REPORTES (ACTUALIZADO: AÑADIDO REPORTE ASISTENCIA)
     elif menu == "📂 Reportes":
         st.header("Generar Reportes PDF")
-        df = cargar_datos("finanzas")
         
-        col1, col2 = st.columns([1, 2])
+        tab_rep_1, tab_rep_2 = st.tabs(["💰 Reporte Finanzas", "👥 Reporte Asistencia"])
         
-        with col1:
-            st.info("El reporte incluirá el logo si 'logo.jpg' está en la carpeta del proyecto.")
-            
-        with col2:
-            if not df.empty:
-                if st.button("📄 Generar PDF de Finanzas", type="primary"):
-                    pdf_bytes = generar_pdf_finanzas(df)
-                    st.download_button(
-                        label="⬇️ Descargar Reporte PDF",
-                        data=pdf_bytes,
-                        file_name=f"Reporte_Finanzas_{datetime.now().strftime('%Y-%m-%d')}.pdf",
-                        mime="application/pdf"
-                    )
+        with tab_rep_1:
+            st.subheader("Finanzas")
+            df_fin = cargar_datos("finanzas")
+            if not df_fin.empty:
+                if st.button("📄 Descargar PDF Finanzas"):
+                    pdf_bytes = generar_pdf_finanzas(df_fin)
+                    st.download_button("⬇️ Descargar", pdf_bytes, f"Finanzas_{datetime.now().date()}.pdf", "application/pdf")
             else:
-                st.warning("No hay datos para generar reporte.")
+                st.warning("Sin datos financieros.")
+                
+        with tab_rep_2:
+            st.subheader("Asistencia")
+            df_asis = cargar_datos("asistencia")
+            if not df_asis.empty:
+                if st.button("📄 Descargar PDF Asistencia"):
+                    pdf_bytes_a = generar_pdf_asistencia(df_asis)
+                    st.download_button("⬇️ Descargar", pdf_bytes_a, f"Asistencia_{datetime.now().date()}.pdf", "application/pdf")
+            else:
+                st.warning("Sin datos de asistencia.")
