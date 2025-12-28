@@ -21,7 +21,7 @@ def init_db():
     # Tabla Asistencia
     c.execute('''CREATE TABLE IF NOT EXISTS asistencia
                  (fecha TEXT, servicio TEXT, hombres INTEGER, mujeres INTEGER, ninos INTEGER, nota TEXT)''')
-    # Tabla Actividades (NUEVA)
+    # Tabla Actividades
     c.execute('''CREATE TABLE IF NOT EXISTS actividades
                  (fecha TEXT, nombre TEXT, encargado TEXT, descripcion TEXT)''')
     conn.commit()
@@ -135,11 +135,12 @@ except:
 
 st.sidebar.title("Menú Principal")
 
-# LOGIN
+# LOGIN (ACTUALIZADO CON TUS USUARIOS)
 users = {
-    "dfuentes": "Jdfm2026**",
+    "dfuentes": "Pastordf2026**",
     "rmerlin": "rebeka2026"
-    }
+}
+
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
@@ -191,17 +192,14 @@ else:
 
         st.divider()
 
-        # --- SECCIÓN ASISTENCIA (NUEVA GRÁFICA) ---
+        # --- SECCIÓN ASISTENCIA ---
         st.subheader("Comportamiento de Asistencia")
         df_asis = cargar_datos("asistencia")
         
         if not df_asis.empty:
-            # Calcular total por registro
             df_asis['Total Asistentes'] = df_asis['hombres'] + df_asis['mujeres'] + df_asis['ninos']
-            # Ordenar por fecha para que la línea tenga sentido
             df_asis = df_asis.sort_values(by='fecha')
             
-            # Gráfico de Líneas
             fig_line = px.line(df_asis, x='fecha', y='Total Asistentes', 
                                markers=True, text='Total Asistentes',
                                title="Tendencia de Asistencia por Fecha",
@@ -211,7 +209,7 @@ else:
         else:
             st.info("Registra asistencias para ver la gráfica de comportamiento.")
 
-    # 2. FINANZAS
+    # 2. FINANZAS (ACTUALIZADO CON NUEVAS CATEGORÍAS Y ADVERTENCIA)
     elif menu == "💰 Finanzas":
         st.header("Gestión Financiera")
         pestana1, pestana2 = st.tabs(["➕ Nuevo Registro", "📋 Historial"])
@@ -222,17 +220,28 @@ else:
                 with col1:
                     f_fecha = st.date_input("Fecha")
                     f_tipo = st.selectbox("Tipo", ["Ingreso", "Gasto"])
+                
+                # LÓGICA DE CATEGORÍAS Y ADVERTENCIA
+                if f_tipo == "Ingreso":
+                    cat_opts = ["Ofrendas", "Diezmos", "Ofrendas de Amor", "Donaciones", "Otros"]
+                else: # Gasto
+                    cat_opts = ["Pago de Servicios", "Pago de renta", "Ayuda Social", "Otros"]
+                    st.warning("⚠️ IMPORTANTE: Recuerde tener el soporte físico (Factura/Recibo) antes de registrar el gasto.")
+
                 with col2:
-                    cat_opts = ["Diezmos", "Ofrendas", "Ventas"] if f_tipo == "Ingreso" else ["Luz/Agua", "Mantenimiento", "Ayuda", "Honorarios", "Limpieza"]
                     f_cat = st.selectbox("Categoría", cat_opts)
                     f_monto = st.number_input("Monto", min_value=0.0, step=0.01)
-                f_nota = st.text_area("Nota")
+                
+                f_nota = st.text_area("Nota / Detalle")
                 f_archivo = st.file_uploader("Evidencia", type=['png', 'jpg', 'pdf'])
-                submitted = st.form_submit_button("💾 Guardar", use_container_width=True)
+                
+                submitted = st.form_submit_button("💾 Guardar Registro", use_container_width=True)
+                
                 if submitted:
                     f_name = f_archivo.name if f_archivo else None
+                    # Se guarda el usuario de la sesión actual
                     guardar_finanza(f_fecha, f_tipo, f_cat, f_monto, f_nota, st.session_state['user_role'], f_archivo, f_name)
-                    st.success("Guardado.")
+                    st.success("Registro guardado exitosamente.")
 
         with pestana2:
             df = cargar_datos("finanzas")
@@ -247,7 +256,8 @@ else:
                     with xc1: st.write(row['fecha'])
                     with xc2: st.write(f"{'🟢' if row['tipo']=='Ingreso' else '🔴'} {row['categoria']}")
                     with xc3: 
-                        st.caption(row['nota'])
+                        st.caption(f"Por: {row['usuario']}") # Mostrar quien lo hizo
+                        st.write(row['nota'])
                         if row['evidencia']: st.caption("📎 Con adjunto")
                     with xc4: st.write(f"${row['monto']:,.2f}")
                     with xc5:
@@ -295,7 +305,7 @@ else:
                     st.markdown("---")
             else: st.info("Sin registros.")
 
-    # 4. ACTIVIDADES (NUEVO MODULO)
+    # 4. ACTIVIDADES
     elif menu == "📅 Actividades":
         st.header("Planificación de Actividades")
         tab_act_1, tab_act_2 = st.tabs(["➕ Nueva Actividad", "📋 Cronograma"])
@@ -325,18 +335,10 @@ else:
             df_act = cargar_datos("actividades")
             
             if not df_act.empty:
-                df_act = df_act.sort_values(by='fecha', ascending=True) # Ordenar por fecha próxima
-                
-                # Encabezados
+                df_act = df_act.sort_values(by='fecha', ascending=True)
                 c1, c2, c3, c4, c5 = st.columns([2, 3, 3, 3, 1])
-                c1.markdown("**Fecha**")
-                c2.markdown("**Actividad**")
-                c3.markdown("**Encargado**")
-                c4.markdown("**Detalles**")
-                c5.markdown("**Acción**")
-                
+                c1.markdown("**Fecha**"); c2.markdown("**Actividad**"); c3.markdown("**Encargado**"); c4.markdown("**Detalles**"); c5.markdown("**Acción**")
                 st.divider()
-                
                 for index, row in df_act.iterrows():
                     ac1, ac2, ac3, ac4, ac5 = st.columns([2, 3, 3, 3, 1])
                     with ac1: st.write(row['fecha'])
