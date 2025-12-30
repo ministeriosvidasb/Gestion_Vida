@@ -1,77 +1,119 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import plotly.express as px
 from datetime import datetime
 from PIL import Image
 import io
 import os
 from fpdf import FPDF
+from sqlalchemy import create_engine, text, Column, Integer, String, Float, Date, LargeBinary
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Ministerios Vida", layout="wide", page_icon="✝️")
 
-# --- FUNCIONES DE BASE DE DATOS ---
-def init_db():
-    conn = sqlite3.connect('iglesia.db')
-    c = conn.cursor()
-    # Tabla Finanzas
-    c.execute('''CREATE TABLE IF NOT EXISTS finanzas
-                 (fecha TEXT, tipo TEXT, categoria TEXT, monto REAL, nota TEXT, usuario TEXT, evidencia BLOB, nombre_archivo TEXT)''')
-    # Tabla Asistencia
-    c.execute('''CREATE TABLE IF NOT EXISTS asistencia
-                 (fecha TEXT, servicio TEXT, hombres INTEGER, mujeres INTEGER, ninos INTEGER, nota TEXT)''')
-    # Tabla Actividades
-    c.execute('''CREATE TABLE IF NOT EXISTS actividades
-                 (fecha TEXT, nombre TEXT, encargado TEXT, descripcion TEXT)''')
-    conn.commit()
-    conn.close()
+# --- CONEXIÓN A BASE DE DATOS (SUPABASE / POSTGRESQL) ---
+# Usamos st.secrets para obtener la URL segura desde la nube
+try:
+    DATABASE_URL = st.secrets["connections"]["postgresql"]["url"]
+except:
+    st.error("⚠️ Error: No se detectó la conexión a la base de datos. Configura los 'Secrets' en Streamlit Cloud.")
+    st.stop()
+
+# Configuración de SQLAlchemy
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# --- MODELOS DE LA BASE DE DATOS ---
+class Finanza(Base):
+    __tablename__ = "finanzas"
+    id = Column(Integer, primary_key=True, index=True)
+    fecha = Column(String)
+    tipo = Column(String)
+    categoria = Column(String)
+    monto = Column(Float)
+    nota = Column(String)
+    usuario = Column(String)
+    evidencia = Column(LargeBinary) # Para guardar archivos
+    nombre_archivo = Column(String)
+
+class Asistencia(Base):
+    __tablename__ = "asistencia"
+    id = Column(Integer, primary_key=True, index=True)
+    fecha = Column(String)
+    servicio = Column(String)
+    hombres = Column(Integer)
+    mujeres = Column(Integer)
+    ninos = Column(Integer)
+    nota = Column(String)
+
+class Actividad(Base):
+    __tablename__ = "actividades"
+    id = Column(Integer, primary_key=True, index=True)
+    fecha = Column(String)
+    nombre = Column(String)
+    encargado = Column(String)
+    descripcion = Column(String)
+
+# Crear tablas si no existen
+Base.metadata.create_all(bind=engine)
+
+# --- FUNCIONES DE GESTIÓN DE DATOS ---
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 def guardar_finanza(fecha, tipo, categoria, monto, nota, usuario, evidencia, nombre_archivo):
-    conn = sqlite3.connect('iglesia.db')
-    c = conn.cursor()
-    # Leer el archivo y convertirlo a binario para guardar en BD
-    if evidencia:
-        # Si venimos del formulario, 'evidencia' es un UploadedFile, hay que leerlo
-        # Si ya lo leímos antes (para validación), hay que asegurar que el puntero esté al inicio
-        evidencia.seek(0)
-        blob_data = evidencia.read()
-    else:
-        blob_data = None
-        
-    c.execute("INSERT INTO finanzas VALUES (?,?,?,?,?,?,?,?)", 
-              (fecha, tipo, categoria, monto, nota, usuario, blob_data, nombre_archivo))
-    conn.commit()
-    conn.close()
+    db = SessionLocal()
+    # Leer binario
+    blob_data = evidencia.read() if evidencia else None
+    nuevo = Finanza(
+        fecha=str(fecha), tipo=tipo, categoria=categoria, monto=monto, 
+        nota=nota, usuario=usuario, evidencia=blob_data, nombre_archivo=nombre_archivo
+    )
+    db.add(nuevo)
+    db.commit()
+    db.close()
 
 def guardar_asistencia(fecha, servicio, h, m, n, nota):
-    conn = sqlite3.connect('iglesia.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO asistencia VALUES (?,?,?,?,?,?)", (fecha, servicio, h, m, n, nota))
-    conn.commit()
-    conn.close()
+    db = SessionLocal()
+    nuevo = Asistencia(
+        fecha=str(fecha), servicio=servicio, hombres=h, mujeres=m, ninos=n, nota=nota
+    )
+    db.add(nuevo)
+    db.commit()
+    db.close()
 
 def guardar_actividad(fecha, nombre, encargado, descripcion):
-    conn = sqlite3.connect('iglesia.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO actividades VALUES (?,?,?,?)", (fecha, nombre, encargado, descripcion))
-    conn.commit()
-    conn.close()
+    db = SessionLocal()
+    nuevo = Actividad(
+        fecha=str(fecha), nombre=nombre, encargado=encargado, descripcion=descripcion
+    )
+    db.add(nuevo)
+    db.commit()
+    db.close()
 
-def cargar_datos(tabla):
-    conn = sqlite3.connect('iglesia.db')
-    df = pd.read_sql_query(f"SELECT rowid, * FROM {tabla}", conn)
-    conn.close()
-    return df
+def cargar_datos(modelo):
+    # Cargar datos usando pandas y sqlalchemy
+    try:
+        df = pd.read_sql(db.query(modelo).statement, db.bind)
+        return df
+    except Exception as e:
+        return pd.DataFrame()
 
-def eliminar_registro(tabla, id_registro):
-    conn = sqlite3.connect('iglesia.db')
-    c = conn.cursor()
-    c.execute(f"DELETE FROM {tabla} WHERE rowid = ?", (id_registro,))
-    conn.commit()
-    conn.close()
+def eliminar_registro(modelo_class, id_registro):
+    db = SessionLocal()
+    registro = db.query(modelo_class).filter(modelo_class.id == id_registro).first()
+    if registro:
+        db.delete(registro)
+        db.commit()
+    db.close()
 
-# --- FUNCIONES PDF ---
+# --- FUNCIONES PDF (MISMAS QUE ANTES) ---
 class PDF(FPDF):
     def header(self):
         if os.path.exists("logo.jpg"):
@@ -130,10 +172,10 @@ def generar_pdf_asistencia(df):
         pdf.ln()
     return pdf.output(dest='S').encode('latin-1')
 
-# Inicializar DB
-init_db()
-
 # --- INTERFAZ ---
+# Inicializar sesión de DB para Pandas
+db = SessionLocal()
+
 logo_path = "logo.jpg"
 try:
     logo = Image.open(logo_path)
@@ -174,9 +216,8 @@ else:
     if menu == "📊 Panel":
         st.title("Panel de Control")
         
-        # --- SECCIÓN FINANZAS ---
         st.subheader("Resumen Financiero")
-        df_fin = cargar_datos("finanzas")
+        df_fin = cargar_datos(Finanza)
         if not df_fin.empty:
             ing = df_fin[df_fin['tipo'] == 'Ingreso']['monto'].sum()
             gas = df_fin[df_fin['tipo'] == 'Gasto']['monto'].sum()
@@ -200,9 +241,8 @@ else:
 
         st.divider()
 
-        # --- SECCIÓN ASISTENCIA ---
         st.subheader("Comportamiento de Asistencia")
-        df_asis = cargar_datos("asistencia")
+        df_asis = cargar_datos(Asistencia)
         
         if not df_asis.empty:
             df_asis['Total Asistentes'] = df_asis['hombres'] + df_asis['mujeres'] + df_asis['ninos']
@@ -215,9 +255,9 @@ else:
             fig_line.update_traces(textposition="bottom right")
             st.plotly_chart(fig_line, use_container_width=True)
         else:
-            st.info("Registra asistencias para ver la gráfica de comportamiento.")
+            st.info("Registra asistencias para ver la gráfica.")
 
-    # 2. FINANZAS (CORREGIDO: CAMBIO AUTOMÁTICO DE CATEGORÍAS Y VALIDACIÓN)
+    # 2. FINANZAS
     elif menu == "💰 Finanzas":
         st.header("Gestión Financiera")
         pestana1, pestana2 = st.tabs(["➕ Nuevo Registro", "📋 Historial"])
@@ -225,24 +265,19 @@ else:
         with pestana1:
             col_ext_1, col_ext_2 = st.columns([1, 2])
             with col_ext_1:
-                # SACAMOS EL TIPO FUERA DEL FORM PARA QUE ACTUALICE LA PÁGINA AL INSTANTE
                 f_tipo = st.radio("Seleccione Tipo de Movimiento:", ["Ingreso", "Gasto"], horizontal=True)
 
-            # LÓGICA DE CATEGORÍAS Y ADVERTENCIA FUERA DEL FORM
             if f_tipo == "Ingreso":
                 cat_opts = ["Ofrendas", "Diezmos", "Ofrendas de Amor", "Donaciones", "Otros"]
-            else: # Gasto
+            else:
                 cat_opts = ["Pago de Servicios", "Pago de renta", "Ayuda Social", "Otros"]
                 st.warning("⚠️ REQUERIDO: Para registrar un GASTO es OBLIGATORIO subir la factura o recibo.")
 
-            # INICIO DEL FORMULARIO
             with st.form("form_finanzas", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 with col1:
                     f_fecha = st.date_input("Fecha")
-                    # El tipo ya lo seleccionamos arriba, aquí solo lo mostramos o usamos el valor
                     st.write(f"Tipo seleccionado: **{f_tipo}**")
-                
                 with col2:
                     f_cat = st.selectbox("Categoría", cat_opts)
                     f_monto = st.number_input("Monto", min_value=0.0, step=0.01)
@@ -250,7 +285,6 @@ else:
                 f_nota = st.text_area("Nota / Detalle")
                 f_archivo = st.file_uploader("Adjuntar Soporte (Factura/Recibo)", type=['png', 'jpg', 'jpeg', 'pdf'])
                 
-                # PUNTO 1: VISTA PREVIA DEL ADJUNTO DENTRO DEL FORMULARIO
                 if f_archivo:
                     st.info(f"Archivo cargado: {f_archivo.name}")
                     if f_archivo.type in ['image/png', 'image/jpeg', 'image/jpg']:
@@ -259,16 +293,15 @@ else:
                 submitted = st.form_submit_button("💾 Guardar Registro", use_container_width=True)
                 
                 if submitted:
-                    # PUNTO 3: VALIDACIÓN ESTRICTA
                     if f_tipo == "Gasto" and f_archivo is None:
-                        st.error("⛔ ERROR: No se puede guardar un GASTO sin adjuntar el soporte físico (Factura/Recibo).")
+                        st.error("⛔ ERROR: No se puede guardar un GASTO sin adjuntar el soporte físico.")
                     else:
                         f_name = f_archivo.name if f_archivo else None
                         guardar_finanza(f_fecha, f_tipo, f_cat, f_monto, f_nota, st.session_state['user_role'], f_archivo, f_name)
-                        st.success("✅ Registro guardado exitosamente.")
+                        st.success("✅ Registro guardado exitosamente en la Nube.")
 
         with pestana2:
-            df = cargar_datos("finanzas")
+            df = cargar_datos(Finanza)
             if not df.empty:
                 df = df.sort_values(by='fecha', ascending=False)
                 c1, c2, c3, c4, c5 = st.columns([2, 2, 3, 2, 1])
@@ -282,7 +315,6 @@ else:
                         st.caption(f"Por: {row['usuario']}")
                         st.write(row['nota'])
                         if row['evidencia']: 
-                            # Mostrar miniatura si es imagen también en historial
                             file_name = row['nombre_archivo'] if row['nombre_archivo'] else "doc"
                             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                                 try:
@@ -290,11 +322,11 @@ else:
                                     st.image(image, width=100)
                                 except: pass
                             else:
-                                st.download_button("📎 Descargar PDF", row['evidencia'], file_name)
+                                st.download_button("📎 Descargar PDF", row['evidencia'], file_name, key=f"dl_{row['id']}")
                     with xc4: st.write(f"${row['monto']:,.2f}")
                     with xc5:
-                        if st.button("🗑️", key=f"del_f_{row['rowid']}"):
-                            eliminar_registro("finanzas", row['rowid'])
+                        if st.button("🗑️", key=f"del_f_{row['id']}"):
+                            eliminar_registro(Finanza, row['id'])
                             st.rerun()
                     st.markdown("---")
             else: st.info("Sin registros.")
@@ -315,10 +347,10 @@ else:
                 a_nota = st.text_area("Observaciones")
                 if st.form_submit_button("💾 Guardar", use_container_width=True):
                     guardar_asistencia(a_fecha, a_serv, h, m, n, a_nota)
-                    st.success("Guardado.")
+                    st.success("Guardado en la Nube.")
         
         with t2:
-            dfa = cargar_datos("asistencia")
+            dfa = cargar_datos(Asistencia)
             if not dfa.empty:
                 dfa = dfa.sort_values(by='fecha', ascending=False)
                 c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 3, 1])
@@ -331,8 +363,8 @@ else:
                     with xc3: st.write(f"H:{row['hombres']} M:{row['mujeres']} N:{row['ninos']} (Tot: {row['hombres']+row['mujeres']+row['ninos']})")
                     with xc4: st.write(row['nota'])
                     with xc5:
-                        if st.button("🗑️", key=f"del_a_{row['rowid']}"):
-                            eliminar_registro("asistencia", row['rowid'])
+                        if st.button("🗑️", key=f"del_a_{row['id']}"):
+                            eliminar_registro(Asistencia, row['id'])
                             st.rerun()
                     st.markdown("---")
             else: st.info("Sin registros.")
@@ -350,11 +382,9 @@ else:
                     act_nombre = st.text_input("Nombre de la Actividad")
                 with col2:
                     act_encargado = st.text_input("Encargado / Líder")
-                
                 act_desc = st.text_area("Detalles / En qué consiste")
                 
                 submitted_act = st.form_submit_button("💾 Guardar Actividad", use_container_width=True)
-                
                 if submitted_act:
                     if act_nombre and act_encargado:
                         guardar_actividad(act_fecha, act_nombre, act_encargado, act_desc)
@@ -364,8 +394,7 @@ else:
 
         with tab_act_2:
             st.subheader("Cronograma de Actividades")
-            df_act = cargar_datos("actividades")
-            
+            df_act = cargar_datos(Actividad)
             if not df_act.empty:
                 df_act = df_act.sort_values(by='fecha', ascending=True)
                 c1, c2, c3, c4, c5 = st.columns([2, 3, 3, 3, 1])
@@ -378,8 +407,8 @@ else:
                     with ac3: st.write(f"👤 {row['encargado']}")
                     with ac4: st.caption(row['descripcion'])
                     with ac5:
-                        if st.button("🗑️", key=f"del_act_{row['rowid']}"):
-                            eliminar_registro("actividades", row['rowid'])
+                        if st.button("🗑️", key=f"del_act_{row['id']}"):
+                            eliminar_registro(Actividad, row['id'])
                             st.rerun()
                     st.markdown("---")
             else:
@@ -390,14 +419,17 @@ else:
         st.header("Generar Reportes PDF")
         t1, t2 = st.tabs(["💰 Finanzas", "👥 Asistencia"])
         with t1:
-            df_fin = cargar_datos("finanzas")
+            df_fin = cargar_datos(Finanza)
             if not df_fin.empty:
                 if st.button("📄 Descargar PDF Finanzas"):
                     st.download_button("⬇️ Descargar", generar_pdf_finanzas(df_fin), "Finanzas.pdf", "application/pdf")
             else: st.warning("Sin datos.")
         with t2:
-            df_asis = cargar_datos("asistencia")
+            df_asis = cargar_datos(Asistencia)
             if not df_asis.empty:
                 if st.button("📄 Descargar PDF Asistencia"):
                     st.download_button("⬇️ Descargar", generar_pdf_asistencia(df_asis), "Asistencia.pdf", "application/pdf")
             else: st.warning("Sin datos.")
+
+# Cierre sesión final
+db.close()
