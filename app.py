@@ -57,7 +57,7 @@ class Actividad(Base):
     descripcion = Column(String)
 
 # Crear tablas si no existen
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 # --- FUNCIONES DE GESTIÓN DE DATOS ---
 def get_db():
