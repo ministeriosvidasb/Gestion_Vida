@@ -221,11 +221,12 @@ else:
         if not df_fin.empty:
             ing = df_fin[df_fin['tipo'] == 'Ingreso']['monto'].sum()
             gas = df_fin[df_fin['tipo'] == 'Gasto']['monto'].sum()
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3,c4 = st.columns(4)
             c1.metric("Ingresos", f"${ing:,.2f}")
             c2.metric("Gastos", f"${gas:,.2f}")
             c3.metric("Caja", f"${ing - gas:,.2f}")
-            
+            c3.metric("Diezmo", f"${ing*0.10:,.2f}")
+
             g1, g2 = st.columns(2)
             with g1:
                 fig_bar = px.bar(df_fin, x='tipo', y='monto', color='tipo', 
