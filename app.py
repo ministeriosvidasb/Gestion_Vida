@@ -225,7 +225,7 @@ else:
             c1.metric("Ingresos", f"${ing:,.2f}")
             c2.metric("Gastos", f"${gas:,.2f}")
             c3.metric("Caja", f"${ing - gas:,.2f}")
-            c3.metric("Diezmo", f"${ing*0.10:,.2f}")
+            c4.metric("Diezmo", f"${ing*0.10:,.2f}")
 
             g1, g2 = st.columns(2)
             with g1:
