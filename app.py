@@ -267,3 +267,4 @@ else:
             # Aquí mostramos lo que viene en el mes para planificar
             df_mes_act = df_act[df_act['fecha_dt'] >= primer_dia_mes].sort_values('fecha_dt')
             st.table(df_mes_act[['fecha', 'nombre', 'encargado']])
+            # También se puede mostrar todo el calendario o actividades pasadas con un toggle similar a los anteriores.
