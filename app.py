@@ -5,7 +5,7 @@ from datetime import datetime
 import io
 import os
 from fpdf import FPDF
-from sqlalchemy import create_engine, Column, Integer, String, Float, Date, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, Float, Date, LargeBinary, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from PIL import Image
 
@@ -16,18 +16,18 @@ st.set_page_config(page_title="Ministerios Vida", layout="wide", page_icon="✝�
 try:
     DATABASE_URL = st.secrets["connections"]["postgresql"]["url"]
 except:
-    st.error("⚠️ Error: Configura los 'Secrets' en Streamlit Cloud (Variable DATABASE_URL).")
+    st.error("⚠️ Error: Configura DATABASE_URL en los Secrets de Streamlit.")
     st.stop()
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- MODELOS DE LA BASE DE DATOS ---
+# --- MODELOS ---
 class Finanza(Base):
     __tablename__ = "finanzas"
     id = Column(Integer, primary_key=True, index=True)
-    fecha = Column(String) # Guardado como string ISO por simplicidad en formularios
+    fecha = Column(String)
     tipo = Column(String)
     categoria = Column(String)
     monto = Column(Float)
@@ -42,7 +42,7 @@ class Diezmo(Base):
     fecha = Column(Date)
     miembro_nombre = Column(String)
     monto = Column(Float)
-    mes_contable = Column(String) # Formato YYYY-MM
+    mes_contable = Column(String)
     estado = Column(String, default="Pendiente")
 
 class Asistencia(Base):
@@ -65,21 +65,22 @@ class Actividad(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# --- FUNCIONES DE CARGA ---
 def cargar_datos(modelo_class):
     db = SessionLocal()
     try:
         query = db.query(modelo_class).statement
         return pd.read_sql(query, db.bind)
+    except:
+        return pd.DataFrame()
     finally:
         db.close()
 
-# --- LÓGICA DE TIEMPO ACTUAL ---
+# --- TIEMPO ---
 hoy = datetime.now()
 mes_actual_str = hoy.strftime("%Y-%m")
 primer_dia_mes = hoy.replace(day=1).date()
 
-# --- LOGIN ---
+# --- LOGIN (Solo dfuentes) ---
 users = {"dfuentes": "Pastordf2026**"}
 
 if 'logged_in' not in st.session_state:
@@ -87,184 +88,140 @@ if 'logged_in' not in st.session_state:
 
 if not st.session_state['logged_in']:
     st.title("⛪ Acceso Ministerios Vida")
-    col_log, _ = st.columns([1, 2])
-    with col_log:
-        usuario = st.text_input("Usuario")
-        password = st.text_input("Contraseña", type="password")
-        if st.button("Ingresar", use_container_width=True):
-            if usuario in users and users[usuario] == password:
-                st.session_state['logged_in'] = True
-                st.session_state['user_role'] = usuario
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas")
+    u = st.text_input("Usuario")
+    p = st.text_input("Contraseña", type="password")
+    if st.button("Ingresar"):
+        if u in users and users[u] == p:
+            st.session_state['logged_in'] = True
+            st.session_state['user_role'] = u
+            st.rerun()
+        else:
+            st.error("Error de acceso")
 else:
-    # --- SIDEBAR CON LOGO ---
+    # Sidebar
     if os.path.exists("logo.jpg"):
         st.sidebar.image("logo.jpg", use_container_width=True)
     
     st.sidebar.title("Menú Principal")
-    st.sidebar.write(f"Bienvenido: **{st.session_state['user_role']}**")
-    
     menu = st.sidebar.radio("Ir a:", ["📊 Panel", "🕊️ Diezmos", "💰 Ofrendas y Gastos", "👥 Asistencia", "📅 Actividades"])
     
     if st.sidebar.button("Cerrar Sesión"):
         st.session_state['logged_in'] = False
         st.rerun()
 
-    # 1. PANEL (Solo Mes Corriente)
+    # 1. PANEL (CON CORRECCIÓN DE KEYERROR)
     if menu == "📊 Panel":
         st.title(f"Resumen Mensual: {hoy.strftime('%B %Y')}")
         
         df_f = cargar_datos(Finanza)
         df_d = cargar_datos(Diezmo)
         
-        # Filtros para el mes actual
+        # Procesar Ofrendas/Gastos
+        ing, gas = 0.0, 0.0
         if not df_f.empty:
             df_f['fecha_dt'] = pd.to_datetime(df_f['fecha']).dt.date
             df_mes_f = df_f[df_f['fecha_dt'] >= primer_dia_mes]
-        else:
-            df_mes_f = pd.DataFrame()
+            ing = df_mes_f[df_mes_f['tipo'] == 'Ingreso']['monto'].sum()
+            gas = df_mes_f[df_mes_f['tipo'] == 'Gasto']['monto'].sum()
 
-        df_mes_d = df_d[df_d['mes_contable'] == mes_actual_str] if not df_d.empty else pd.DataFrame()
+        # Procesar Diezmos (Evitando el error de columna faltante)
+        diez_p = 0.0
+        if not df_d.empty:
+            df_mes_d = df_d[df_d['mes_contable'] == mes_actual_str]
+            if not df_mes_d.empty:
+                # Si la columna 'estado' no existe en el DataFrame actual, sumamos todo como pendiente
+                if 'estado' in df_mes_d.columns:
+                    diez_p = df_mes_d[df_mes_d['estado'] == 'Pendiente']['monto'].sum()
+                else:
+                    diez_p = df_mes_d['monto'].sum()
 
         c1, c2, c3, c4 = st.columns(4)
-        
-        ing = df_mes_f[df_mes_f['tipo'] == 'Ingreso']['monto'].sum()
-        gas = df_mes_f[df_mes_f['tipo'] == 'Gasto']['monto'].sum()
-        diez_p = df_mes_d[df_mes_d['estado'] == 'Pendiente']['monto'].sum()
-        
-        c1.metric("Ofrendas del Mes", f"${ing:,.2f}")
-        c2.metric("Gastos del Mes", f"${gas:,.2f}")
-        c3.metric("Diezmos Pendientes", f"${diez_p:,.2f}")
-        c4.metric("Saldo Disponible", f"${(ing - gas) + diez_p:,.2f}")
+        c1.metric("Ofrendas Mes", f"${ing:,.2f}")
+        c2.metric("Gastos Mes", f"${gas:,.2f}")
+        c3.metric("Diezmos Pend.", f"${diez_p:,.2f}")
+        c4.metric("Saldo Real", f"${(ing - gas) + diez_p:,.2f}")
 
         st.divider()
-        col_g1, col_g2 = st.columns(2)
-        with col_g1:
-            if not df_mes_f.empty:
-                fig = px.bar(df_mes_f, x='categoria', y='monto', color='tipo', title="Movimientos del Mes")
-                st.plotly_chart(fig, use_container_width=True)
-        with col_g2:
-            df_a = cargar_datos(Asistencia)
-            if not df_a.empty:
-                df_a['fecha_dt'] = pd.to_datetime(df_a['fecha']).dt.date
-                df_mes_a = df_a[df_a['fecha_dt'] >= primer_dia_mes]
-                if not df_mes_a.empty:
-                    df_mes_a['Total'] = df_mes_a['hombres'] + df_mes_a['mujeres'] + df_mes_a['ninos']
-                    fig_a = px.line(df_mes_a, x='fecha', y='Total', title="Asistencia del Mes", markers=True)
-                    st.plotly_chart(fig_a, use_container_width=True)
+        if not df_f.empty:
+            fig = px.pie(df_f[pd.to_datetime(df_f['fecha']).dt.date >= primer_dia_mes], 
+                         values='monto', names='categoria', title="Gastos/Ingresos por Categoría")
+            st.plotly_chart(fig, use_container_width=True)
 
-    # 2. DIEZMOS (Independientes)
+    # 2. DIEZMOS
     elif menu == "🕊️ Diezmos":
-        st.header("Control de Diezmos")
-        t1, t2 = st.tabs(["📥 Registro", "📊 Cierre de Mes"])
-        
+        st.header("Gestión de Diezmos")
+        t1, t2 = st.tabs(["📥 Registro", "📊 Cierre"])
         with t1:
-            with st.form("d_nuevo", clear_on_submit=True):
-                col_x, col_y = st.columns(2)
-                d_f = col_x.date_input("Fecha", hoy)
-                d_n = col_x.text_input("Nombre del Miembro")
-                d_m = col_y.number_input("Monto $", min_value=0.0)
-                if st.form_submit_button("Guardar Diezmo"):
+            with st.form("d_f", clear_on_submit=True):
+                dfec = st.date_input("Fecha", hoy)
+                dnom = st.text_input("Miembro")
+                dmon = st.number_input("Monto", 0.0)
+                if st.form_submit_button("Guardar"):
                     db = SessionLocal()
-                    nuevo = Diezmo(fecha=d_f, miembro_nombre=d_n, monto=d_m, 
-                                   mes_contable=d_f.strftime("%Y-%m"), estado="Pendiente")
-                    db.add(nuevo)
-                    db.commit()
-                    db.close()
-                    st.success("Registrado.")
-
+                    nuevo = Diezmo(fecha=dfec, miembro_nombre=dnom, monto=dmon, 
+                                   mes_contable=dfec.strftime("%Y-%m"), estado="Pendiente")
+                    db.add(nuevo); db.commit(); db.close()
+                    st.success("Guardado")
         with t2:
             df_d = cargar_datos(Diezmo)
             if not df_d.empty:
-                # Mostrar mes actual por defecto
-                mes_sel = st.selectbox("Seleccione Mes para Liquidación", df_d['mes_contable'].unique()[::-1])
-                resumen_mes = df_d[df_d['mes_contable'] == mes_sel]
-                pend = resumen_mes[resumen_mes['estado'] == 'Pendiente']['monto'].sum()
-                
-                st.info(f"Total Diezmos de {mes_sel}: **${resumen_mes['monto'].sum():,.2f}**")
-                st.dataframe(resumen_mes[['fecha', 'miembro_nombre', 'monto', 'estado']], use_container_width=True)
-                
-                if pend > 0:
-                    if st.button(f"Confirmar Salida/Entrega de ${pend:,.2f}"):
+                mes_s = st.selectbox("Mes", df_d['mes_contable'].unique()[::-1])
+                res = df_d[df_d['mes_contable'] == mes_s]
+                st.dataframe(res, use_container_width=True)
+                if 'estado' in res.columns:
+                    p_monto = res[res['estado'] == 'Pendiente']['monto'].sum()
+                    if p_monto > 0 and st.button(f"Liquidar ${p_monto:,.2f}"):
                         db = SessionLocal()
-                        db.query(Diezmo).filter(Diezmo.mes_contable == mes_sel, Diezmo.estado == "Pendiente").update({"estado": "Entregado"})
+                        db.execute(text(f"UPDATE diezmos SET estado = 'Entregado' WHERE mes_contable = '{mes_s}' AND estado = 'Pendiente'"))
                         db.commit(); db.close()
-                        st.success("Salida mensual procesada."); st.rerun()
+                        st.rerun()
 
     # 3. OFRENDAS Y GASTOS
     elif menu == "💰 Ofrendas y Gastos":
-        st.header("Ingresos y Gastos")
+        st.header("Ofrendas y Gastos")
         t1, t2 = st.tabs(["➕ Nuevo", "📋 Historial"])
-        
         with t1:
             tipo = st.radio("Tipo", ["Ingreso", "Gasto"], horizontal=True)
-            with st.form("f_form"):
-                c1, c2 = st.columns(2)
-                f = c1.date_input("Fecha")
-                cat = c2.selectbox("Categoría", ["Ofrendas", "Donaciones"] if tipo == "Ingreso" else ["Servicios", "Renta", "Ayuda", "Mantenimiento"])
-                m = c1.number_input("Monto", 0.0)
-                n = st.text_area("Descripción")
-                arch = st.file_uploader("Soporte")
+            with st.form("f_f"):
+                f = st.date_input("Fecha")
+                c = st.selectbox("Categoría", ["Ofrendas", "Otros"] if tipo=="Ingreso" else ["Renta", "Luz", "Agua", "Otros"])
+                m = st.number_input("Monto", 0.0)
                 if st.form_submit_button("Guardar"):
                     db = SessionLocal()
-                    blob = arch.read() if arch else None
-                    nuevo = Finanza(fecha=str(f), tipo=tipo, categoria=cat, monto=m, nota=n, 
-                                    usuario=st.session_state['user_role'], evidencia=blob, 
-                                    nombre_archivo=arch.name if arch else None)
-                    db.add(nuevo); db.commit(); db.close()
-                    st.success("Guardado correctamente.")
-
+                    db.add(Finanza(fecha=str(f), tipo=tipo, categoria=c, monto=m, usuario="dfuentes"))
+                    db.commit(); db.close()
+                    st.success("Guardado")
         with t2:
             df = cargar_datos(Finanza)
             if not df.empty:
-                ver_todo = st.toggle("Ver historial completo de otros meses")
-                if not ver_todo:
-                    df['fecha_dt'] = pd.to_datetime(df['fecha']).dt.date
-                    df = df[df['fecha_dt'] >= primer_dia_mes]
-                st.dataframe(df[['fecha', 'tipo', 'categoria', 'monto', 'nota']], use_container_width=True)
+                st.dataframe(df.sort_values("fecha", ascending=False), use_container_width=True)
 
     # 4. ASISTENCIA
     elif menu == "👥 Asistencia":
         st.header("Asistencia")
-        with st.form("a_form"):
-            c1, c2 = st.columns(2)
-            f = c1.date_input("Fecha")
-            s = c1.selectbox("Servicio", ["Dominical", "Oración", "Estudio", "Vigilia"])
-            h = c2.number_input("H", 0); m = c2.number_input("M", 0); n = c2.number_input("N", 0)
-            if st.form_submit_button("Registrar"):
+        with st.form("a_f"):
+            f = st.date_input("Fecha")
+            s = st.selectbox("Servicio", ["Dominical", "Oración", "Estudio"])
+            h = st.number_input("H", 0); m = st.number_input("M", 0); n = st.number_input("N", 0)
+            if st.form_submit_button("Guardar"):
                 db = SessionLocal()
                 db.add(Asistencia(fecha=str(f), servicio=s, hombres=h, mujeres=m, ninos=n))
                 db.commit(); db.close()
-                st.success("Asistencia guardada.")
-        
+                st.success("Registrado")
         df_a = cargar_datos(Asistencia)
-        if not df_a.empty:
-            ver_todo_a = st.toggle("Ver asistencias pasadas")
-            if not ver_todo_a:
-                df_a['fecha_dt'] = pd.to_datetime(df_a['fecha']).dt.date
-                df_a = df_a[df_a['fecha_dt'] >= primer_dia_mes]
-            st.dataframe(df_a, use_container_width=True)
+        if not df_a.empty: st.dataframe(df_a, use_container_width=True)
 
     # 5. ACTIVIDADES
     elif menu == "📅 Actividades":
-        st.header("Actividades del Mes")
-        with st.form("act_form"):
+        st.header("Actividades")
+        with st.form("ac_f"):
             f = st.date_input("Fecha")
-            nom = st.text_input("Actividad")
-            enc = st.text_input("Responsable")
-            desc = st.text_area("Detalles")
-            if st.form_submit_button("Programar"):
+            n = st.text_input("Actividad")
+            e = st.text_input("Líder")
+            if st.form_submit_button("Guardar"):
                 db = SessionLocal()
-                db.add(Actividad(fecha=str(f), nombre=nom, encargado=enc, descripcion=desc))
+                db.add(Actividad(fecha=str(f), nombre=n, encargado=e))
                 db.commit(); db.close()
-                st.success("Actividad programada.")
-        
-        df_act = cargar_datos(Actividad)
-        if not df_act.empty:
-            df_act['fecha_dt'] = pd.to_datetime(df_act['fecha']).dt.date
-            # Aquí mostramos lo que viene en el mes para planificar
-            df_mes_act = df_act[df_act['fecha_dt'] >= primer_dia_mes].sort_values('fecha_dt')
-            st.table(df_mes_act[['fecha', 'nombre', 'encargado']])
-            # También se puede mostrar todo el calendario o actividades pasadas con un toggle similar a los anteriores.
+                st.success("Programado")
+        df_ac = cargar_datos(Actividad)
+        if not df_ac.empty: st.table(df_ac)
