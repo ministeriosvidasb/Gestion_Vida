@@ -278,3 +278,4 @@ else:
         
         df_act = cargar_datos(Actividad)
         st.table(df_act[['fecha', 'nombre', 'encargado']])
+        # Detalles de actividades
