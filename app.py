@@ -98,7 +98,7 @@ class PDF(FPDF):
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 # --- INTERFAZ Y LOGIN ---
-users = {"dfuentes": "Pastordf2026**", "rmerlin": "rebeka2026"}
+users = {"dfuentes": "Pastordf2026**"}
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
